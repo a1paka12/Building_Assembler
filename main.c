@@ -1,6 +1,7 @@
 // macOS에서 mkstemp와 fdopen의 POSIX 선언을 사용할 수 있게 한다.
 #define _POSIX_C_SOURCE 200809L
-#include "src/encode_i.h"
+#include "src/encode.h"
+#include "src/layout.h"
 #include "src/output.h"
 #include "src/parse.h"
 
@@ -11,7 +12,14 @@
 // 입력을 한 줄씩 분리·매핑·인코딩해 출력에 쓴다. 성공하면 0, 오류면 1을 반환한다.
 static int assemble(FILE *input, FILE *output, const char *filename)
 {
-    char line[256];
+    struct AssemblyLayout layout;
+    if (collect_layout(input, &layout) != 0)
+        return 1;
+
+    struct SectionCursor cursor = {
+        .starts = {TEXT_START, TEXT_START + layout.data_offset, TEXT_START + layout.bss_offset}
+    };
+    char line[LINE_CAPACITY];
     int line_number = 0;
 
     // fgets는 파일에서 한 줄씩 읽는다. 현재 실습의 줄 버퍼는 256바이트다.
@@ -22,20 +30,42 @@ static int assemble(FILE *input, FILE *output, const char *filename)
         enum LineResult result = parse_line(line, line_number, &parsed_line);
         if (result == LINE_ERROR)
             return 1;
-        if (result == LINE_SKIP)
+        if (result == LINE_SKIP || parsed_line.mnemonic == NULL)
             continue;
 
+        struct LineLayout item;
+        if (layout_line(&cursor, &parsed_line, line_number, &layout.labels, &item) != 0)
+            return 1;
+        if (item.size == 0 || cursor.section == SECTION_BSS ||
+            item.directive == DIRECTIVE_SPACE || item.directive == DIRECTIVE_ALIGN)
+            continue;
+
+        uint32_t address = cursor.starts[cursor.section] + item.offset;
+        uint32_t offset = address - TEXT_START;
+        if (fseeko(output, offset, SEEK_SET) != 0) {
+            perror(filename);
+            return 1;
+        }
+
+        if (item.directive != DIRECTIVE_NONE) {
+            if (write_directive(output, filename, item.directive, &parsed_line,
+                                line_number, &layout.labels) != 0)
+                return 1;
+            continue;
+        }
+
         struct ParsedInstruction instruction;
-        if (parse_instruction(&parsed_line, line_number, &instruction) != LINE_OK)
+        if (parse_instruction(&parsed_line, line_number, &layout.labels,
+                              address, &instruction) != LINE_OK)
             return 1;
 
-        if (strcmp(parsed_line.mnemonic, "addi") != 0) {
-            fprintf(stderr, "%d행: '%s' 인코더는 아직 구현되지 않음\n",
+        uint32_t word;
+        if (encode_instruction(&instruction, &word) != 0) {
+            fprintf(stderr, "%d행: '%s' 명령을 인코딩할 수 없음\n",
                     line_number, parsed_line.mnemonic);
             return 1;
         }
 
-        uint32_t word = encode_addi(instruction.operands.i);
         if (write_word_le(output, word, filename) != 0)
             return 1;
     }
@@ -45,6 +75,14 @@ static int assemble(FILE *input, FILE *output, const char *filename)
         perror("입력 읽기");
         return 1;
     }
+
+    // 새 임시 파일의 빈 구간은 0으로 읽힌다. 끝부분의 .space/.align도 파일 크기에 반영한다.
+    uint32_t size = layout.data_size != 0 ? layout.data_offset + layout.data_size : layout.text_size;
+    if (fflush(output) != 0 || ftruncate(fileno(output), size) != 0) {
+        perror(filename);
+        return 1;
+    }
+
     return 0;
 }
 
