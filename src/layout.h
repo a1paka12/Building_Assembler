@@ -22,6 +22,7 @@ struct LineLayout {
     enum DirectiveKind directive;
     uint32_t offset;
     uint32_t size;
+    int pseudo;
 };
 
 struct AssemblyLayout {

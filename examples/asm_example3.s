@@ -191,7 +191,7 @@ DB_COL:
 CLEAR_SCREEN:
         la      t0, PIXBUF
         lw      t0, 0(t0)
-        li      t1, SCREEN_H * 512 / 4  # 워드 수
+        li      t1, 15360  # 워드 수 SCREEN_H * 512 / 4
 CS_LOOP:
         sw      zero, 0(t0)
         addi    t0, t0, 4

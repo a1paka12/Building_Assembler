@@ -11,6 +11,7 @@
 #include "layout.h"
 #include "output.h"
 #include "parse.h"
+#include "pseudo.h"
 #include "register_helper.h"
 
 static void test_registers(void)
@@ -338,6 +339,72 @@ static void test_parse_and_encode(void)
     }
 }
 
+static void test_pseudos(void)
+{
+    const struct LabelTable labels = {
+        .items = {{"target", 0x10800, 0}}, .count = 1
+    };
+    struct {
+        char text[32];
+        uint32_t words[MAX_PSEUDO_WORDS];
+        size_t count;
+    } cases[] = {
+        {"li t0, -2048",     {0x80000293u}, 1},
+        {"li t0, 2047",      {0x7ff00293u}, 1},
+        {"li t0, 2048",      {0x000012b7u, 0x80028293u}, 2},
+        {"li t0, 0x12345fff",{0x123462b7u, 0xfff28293u}, 2},
+        {"li t0, 0xffffffff",{0x000002b7u, 0xfff28293u}, 2},
+        {"la t0, target",    {0x00001297u, 0x80028293u}, 2},
+        {"mv t0, t1",        {0x00030293u}, 1},
+        {"nop",              {0x00000013u}, 1},
+        {"not t0, t1",       {0xfff34293u}, 1},
+        {"neg t0, t1",       {0x406002b3u}, 1},
+        {"j 8",              {0x0080006fu}, 1},
+        {"jal 8",            {0x008000efu}, 1},
+        {"call 8",           {0x008000efu}, 1},
+        {"jr t0",            {0x00028067u}, 1},
+        {"ret",              {0x00008067u}, 1},
+        {"beqz t0, 8",       {0x00028463u}, 1},
+        {"bnez t0, 8",       {0x00029463u}, 1},
+        {"bgt t0, t1, 8",    {0x00534463u}, 1},
+        {"ble t0, t1, 8",    {0x00535463u}, 1},
+        {"bgtu t0, t1, 8",   {0x00536463u}, 1},
+        {"bleu t0, t1, 8",   {0x00537463u}, 1},
+        {"bgtz t0, 8",       {0x00504463u}, 1},
+        {"bltz t0, 8",       {0x0002c463u}, 1},
+        {"csrr t0, mstatus", {0x300022f3u}, 1},
+        {"csrw mtvec, t0",   {0x30529073u}, 1},
+        {"csrs mie, t0",     {0x3042a073u}, 1},
+        {"csrsi mstatus, 8", {0x30046073u}, 1},
+        {"csrci mstatus, 8", {0x30047073u}, 1}
+    };
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; ++i) {
+        struct ParsedLine line;
+        struct ParsedInstruction result[MAX_PSEUDO_WORDS];
+        uint32_t size, word;
+        size_t count;
+        int number = (int)i + 1;
+        assert(parse_line(cases[i].text, number, &line) == LINE_OK);
+        assert(pseudo_size(&line, &labels, number, &size) == 0);
+        assert(expand_pseudo(&line, &labels, 0x10000, number, result, &count) == 0);
+        assert(count == cases[i].count && size == count * 4);
+        for (size_t j = 0; j < count; ++j) {
+            assert(encode_instruction(&result[j], &word) == 0);
+            assert(word == cases[i].words[j]);
+        }
+    }
+
+    char invalid[][32] = {"li x32, 0", "li t0, 0x100000000", "la t0, missing",
+                          "beqz t0, 3", "csrsi mstatus, 32", "csrw 0x1000, t0"};
+    for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; ++i) {
+        struct ParsedLine line;
+        struct ParsedInstruction result[MAX_PSEUDO_WORDS];
+        size_t count;
+        assert(parse_line(invalid[i], 1, &line) == LINE_OK);
+        assert(expand_pseudo(&line, &labels, 0x10000, 1, result, &count) != 0);
+    }
+}
+
 static void test_labels(void)
 {
     const struct LabelTable labels = {
@@ -508,6 +575,7 @@ int main(void)
     test_labels();
     test_encoder();
     test_parse_and_encode();
+    test_pseudos();
     test_directives_and_layout();
     test_data_directives();
     test_binary_output();

@@ -1,4 +1,5 @@
 #include "layout.h"
+#include "pseudo.h"
 #include "values.h"
 
 #include <string.h>
@@ -20,6 +21,7 @@ int layout_line(struct SectionCursor *cursor, const struct ParsedLine *line,
 {
     enum DirectiveKind directive = directive_kind(line->mnemonic);
     uint32_t size;
+    int pseudo = 0;
     if (directive != DIRECTIVE_NONE) {
         int section_change = select_section(directive, &cursor->section);
         if (cursor->section == SECTION_BSS && !section_change &&
@@ -33,7 +35,7 @@ int layout_line(struct SectionCursor *cursor, const struct ParsedLine *line,
             return 1;
     } else {
         const struct InstructionInfo *info = instruction_info(line->mnemonic);
-        if (info == NULL || info->format == FORMAT_PSEUDO) {
+        if (info == NULL) {
             fprintf(stderr, "%d행: 지원하지 않는 명령 또는 지시어 '%s'\n",
                     line_number, line->mnemonic);
             return 1;
@@ -44,6 +46,10 @@ int layout_line(struct SectionCursor *cursor, const struct ParsedLine *line,
             return 1;
         }
         size = 4;
+        pseudo = info->format == FORMAT_PSEUDO ||
+                 (strcmp(info->mnemonic, "jal") == 0 && line->operand_count == 1);
+        if (pseudo && pseudo_size(line, labels, line_number, &size) != 0)
+            return 1;
     }
 
     uint32_t *offset = &cursor->offsets[cursor->section];
@@ -51,7 +57,9 @@ int layout_line(struct SectionCursor *cursor, const struct ParsedLine *line,
         fprintf(stderr, "%d행: 섹션 크기 초과\n", line_number);
         return 1;
     }
-    *out = (struct LineLayout){.directive = directive, .offset = *offset, .size = size};
+    *out = (struct LineLayout){
+        .directive = directive, .offset = *offset, .size = size, .pseudo = pseudo
+    };
     *offset += size;
     return 0;
 }

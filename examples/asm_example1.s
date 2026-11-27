@@ -41,7 +41,7 @@ _start:
 
         jal     UPDATE_DISPLAY          #    00 00 00 표시
 
-        li      t0, (1 << IRQ_TIMER) | (1 << IRQ_KEY)
+        li      t0, 0x00050000
         csrs    mie, t0                 # 3. IRQ 16, 18 허용
         csrsi   mstatus, 0x8            # 4. mstatus.MIE = 1
 IDLE:
@@ -64,9 +64,9 @@ HANDLER:
         sw      a2, 0(sp)
 
         csrr    t0, mcause              # 원인: 0x80000000 | IRQ
-        li      t1, 0x80000000 | IRQ_TIMER
+        li      t1, 0x80000010  # 0x80000000 | IRQ_TIMER
         beq     t0, t1, DO_TIMER
-        li      t1, 0x80000000 | IRQ_KEY
+        li      t1, 0x80000012  # 0x80000000 | IRQ_KEY
         beq     t0, t1, DO_KEY
 UNEXPECTED:
         j       UNEXPECTED              # 예상 밖의 트랩이면 멈춤
@@ -85,7 +85,7 @@ EXIT_TRAP:
         lw      t0, 24(sp)
         lw      ra, 28(sp)
         addi    sp, sp, 32
-        mret
+.word 0x30200073  # mret
 
 # ---------------------------------------------------------------------------
 # TIMER_ISR: 10 ms 마다. TO 해제 -> running 이면 시간 증가 -> 표시 갱신

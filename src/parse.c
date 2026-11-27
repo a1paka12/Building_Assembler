@@ -1,4 +1,5 @@
 #include "parse.h"
+#include "csr_table.h"
 #include "register_helper.h"
 #include "values.h"
 
@@ -111,6 +112,18 @@ const struct Label *find_label(const struct LabelTable *table, const char *name)
     return NULL;
 }
 
+// CSR 이름 또는 12비트 번호를 읽는다.
+static int csr_number(const char *text, const struct LabelTable *labels)
+{
+    for (size_t i = 0; i < sizeof csr_names / sizeof csr_names[0]; ++i) {
+        if (strcmp(text, csr_names[i].name) == 0)
+            return csr_names[i].number;
+    }
+    int64_t value;
+    return parse_value(text, labels, &value) == 0 && value >= 0 && value <= 4095
+           ? (int)value : -1;
+}
+
 // 명령 테이블을 조회해 피연산자를 해당 포맷의 union 멤버에 저장한다.
 enum LineResult parse_instruction(const struct ParsedLine *line, int line_number,
                                   const struct LabelTable *labels, uint32_t pc,
@@ -123,6 +136,30 @@ enum LineResult parse_instruction(const struct ParsedLine *line, int line_number
     if (info == NULL) {
         fprintf(stderr, "%d행: 알 수 없는 명령 '%s'\n", line_number, line->mnemonic);
         return LINE_ERROR;
+    }
+
+    // CSR 주소는 imm 필드에, rs1 또는 uimm은 5비트 rs1 필드에 넣는다.
+    if (info->opcode == 0x73 && info->funct3 > 0) {
+        if (line->operand_count != 3) {
+            fprintf(stderr, "%d행: CSR 명령은 피연산자 3개가 필요함\n", line_number);
+            return LINE_ERROR;
+        }
+        int rd = reg_number(line->operands[0]);
+        int csr = csr_number(line->operands[1], labels);
+        int64_t rs1;
+        if (info->funct3 < 5)
+            rs1 = reg_number(line->operands[2]);
+        else if (parse_value(line->operands[2], labels, &rs1) != 0)
+            rs1 = -1;
+        if (rd < 0 || csr < 0 || rs1 < 0 || rs1 > 31) {
+            fprintf(stderr, "%d행: 잘못된 CSR 피연산자\n", line_number);
+            return LINE_ERROR;
+        }
+        *out = (struct ParsedInstruction){
+            .format = FORMAT_I, .info = info,
+            .operands.i = {.rd = rd, .rs1 = (int)rs1, .imm = csr}
+        };
+        return LINE_OK;
     }
 
     struct OperandLayout {

@@ -31,7 +31,7 @@ _start:
         li      sp, STACK_TOP
         la      t0, HANDLER
         csrw    mtvec, t0
-        li      t0, 1 << IRQ_TIMER
+        li      t0, 0x00010000
         csrs    mie, t0
         csrsi   mstatus, 0x8
 
@@ -63,7 +63,7 @@ HANDLER:
         sw      t1, 4(sp)
         sw      t2, 0(sp)
         csrr    t0, mcause
-        li      t1, 0x80000000 | IRQ_TIMER
+        li      t1, 0x80000010  # 0x80000000 | IRQ_TIMER
         bne     t0, t1, UNEXPECTED
         li      t0, TIMER_BASE
         sw      zero, 0(t0)             # TO 지우기
@@ -77,7 +77,7 @@ HANDLER:
         lw      t0, 8(sp)
         lw      ra, 12(sp)
         addi    sp, sp, 16
-        mret
+.word 0x30200073  # mret
 UNEXPECTED:
         j       UNEXPECTED
 
@@ -411,7 +411,7 @@ HD_AF:  ori     a0, a0, 0x20            # 소문자로
         bltu    a0, t0, HD_NO
         li      t0, 'f'
         bgtu    a0, t0, HD_NO
-        addi    a0, a0, -'a' + 10
+        addi    a0, a0, -87  # -'a' + 10
         ret
 HD_NO:  li      a0, -1
         ret

@@ -4,6 +4,7 @@
 #include "src/layout.h"
 #include "src/output.h"
 #include "src/parse.h"
+#include "src/pseudo.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -54,20 +55,30 @@ static int assemble(FILE *input, FILE *output, const char *filename)
             continue;
         }
 
-        struct ParsedInstruction instruction;
-        if (parse_instruction(&parsed_line, line_number, &layout.labels,
-                              address, &instruction) != LINE_OK)
-            return 1;
-
-        uint32_t word;
-        if (encode_instruction(&instruction, &word) != 0) {
-            fprintf(stderr, "%d행: '%s' 명령을 인코딩할 수 없음\n",
-                    line_number, parsed_line.mnemonic);
+        struct ParsedInstruction instructions[MAX_PSEUDO_WORDS];
+        size_t count = 1;
+        if (item.pseudo) {
+            if (expand_pseudo(&parsed_line, &layout.labels, address,
+                              line_number, instructions, &count) != 0)
+                return 1;
+        } else if (parse_instruction(&parsed_line, line_number, &layout.labels,
+                                     address, &instructions[0]) != LINE_OK) {
             return 1;
         }
-
-        if (write_word_le(output, word, filename) != 0)
+        if (count * 4 != item.size) {
+            fprintf(stderr, "%d행: 명령어 배치와 인코딩 크기가 다름\n", line_number);
             return 1;
+        }
+        for (size_t i = 0; i < count; ++i) {
+            uint32_t word;
+            if (encode_instruction(&instructions[i], &word) != 0) {
+                fprintf(stderr, "%d행: '%s' 명령을 인코딩할 수 없음\n",
+                        line_number, parsed_line.mnemonic);
+                return 1;
+            }
+            if (write_word_le(output, word, filename) != 0)
+                return 1;
+        }
     }
 
     // fgets가 NULL을 돌려준 이유가 읽기 오류였는지 확인한다.

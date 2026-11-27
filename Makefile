@@ -1,7 +1,7 @@
 CFLAGS ?= -std=c11 -Wall -Wextra
 
 MODULES = src/parse.c src/encode.c src/output.c \
-          src/register_helper.c src/format_finder.c src/layout.c src/directives.c src/values.c
+          src/register_helper.c src/format_finder.c src/layout.c src/directives.c src/values.c src/pseudo.c
 SOURCES = main.c $(MODULES)
 HEADERS = $(wildcard src/*.h)
 
